@@ -1,0 +1,22 @@
+[Unit]
+Description=Log Watcher Telegram Bot
+After=network.target
+
+[Service]
+ExecStart=/home/encrypt0r/LOG/nightwatch/nightwatche-rs
+WorkingDirectory=/home/encrypt0r/LOG/nightwatch
+EnvironmentFile=/home/encrypt0r/LOG/nightwatch/.env
+User=logwatcher
+Group=logwatcher
+SupplementaryGroups=encrypt0r
+StandardOutput=append:/var/log/nightwatch/std.log
+StandardError=append:/var/log/nightwatch/std.err
+Restart=always
+RestartSec=5
+CapabilityBoundingSet=CAP_DAC_READ_SEARCH
+AmbientCapabilities=CAP_DAC_READ_SEARCH
+ReadWritePaths=/home/encrypt0r/LOG/nightwatch /var/log/nightwatch/std.log /var/log/nightwatch/std.err
+ReadOnlyPaths=/var/log/auth.log /home/encrypt0r/LOG/nightwatch/.env
+
+[Install]
+WantedBy=multi-user.target
