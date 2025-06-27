@@ -1,0 +1,96 @@
+name: Rust CI Build
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        rust_target:
+          - x86_64-unknown-linux-gnu # Standard Linux (AMD64/x86_64)
+          - aarch64-unknown-linux-gnu # ARM64 (Raspberry Pi 4, servers)
+        artifact_name:
+          - nightwatche-rs-linux-amd64
+          - nightwatche-rs-linux-arm64
+        include:
+          - rust_target: x86_64-unknown-linux-gnu
+            artifact_name: nightwatche-rs-linux-amd64
+          - rust_target: aarch64-unknown-linux-gnu
+            artifact_name: nightwatche-rs-linux-arm64
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain for ${{ matrix.rust_target }}
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          target: ${{ matrix.rust_target }}
+
+      - name: Install build dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y build-essential pkg-config libssl-dev
+
+      - name: Run cargo build --release for ${{ matrix.rust_target }}
+        run: cargo build --verbose --release --target ${{ matrix.rust_target }}
+
+      - name: Calculate SHA256 sum for ${{ matrix.artifact_name }}
+        id: sha256_calc
+        run: |
+          BINARY_PATH="target/${{ matrix.rust_target }}/release/nightwatche-rs"
+          if [ -f "$BINARY_PATH" ]; then
+            SHA=$(sha256sum "$BINARY_PATH" | awk '{print $1}')
+            echo "$SHA ${{ matrix.artifact_name }}" > "${{ matrix.artifact_name }}.sha256"
+          else
+            echo "Error: Binary not found at $BINARY_PATH"
+            exit 1
+          fi
+
+      - name: Upload ${{ matrix.artifact_name }} binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: target/${{ matrix.rust_target }}/release/nightwatche-rs
+
+      - name: Upload SHA256 sum file for ${{ matrix.artifact_name }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: sha256-individual
+          path: ${{ matrix.artifact_name }}.sha256
+
+  combine_checksums:
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+      - name: Download all individual SHA256 sum files
+        uses: actions/download-artifact@v4
+        with:
+          name: sha256-individual
+          path: downloaded_sha_files
+
+      - name: Combine SHA256 sums into single 'prebuilt.sha256' file
+        run: |
+          echo "--- Combining SHA256 checksums ---"
+          # Find all .sha256 files within the downloaded_sha_files directory and concatenate them
+          find downloaded_sha_files -type f -name "*.sha256" -exec cat {} + > prebuilt.sha256
+          echo "Contents of prebuilt.sha256:"
+          cat prebuilt.sha256
+          # Ensure the file is at the root for uploading
+          mv prebuilt.sha256 .
+
+      - name: Upload combined prebuilt.sha256 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: prebuilt-checksums
+          path: prebuilt.sha256
