@@ -12,7 +12,7 @@ pub struct Config {
     pub telegram_topic_id: Option<i32>,
     pub master_api_endpoint: Option<String>,
     pub internal_api_key: String,
-    pub slave_listen_addr: String,
+    pub listen_addr: String,
     pub slaves: HashMap<String, String>,
 }
 
@@ -49,7 +49,7 @@ pub fn load() -> Result<Config> {
         telegram_topic_id,
         master_api_endpoint: env::var("MASTER_API_ENDPOINT").ok(),
         internal_api_key,
-        slave_listen_addr: env::var("SLAVE_LISTEN_ADDR").unwrap_or_else(|_| "0.0.0.0:8080".to_string()),
+        listen_addr: env::var("LISTEN_ADDR").unwrap_or_else(|_| "127.0.0.1:13001".to_string()),
         slaves: HashMap::new(),
     };
 

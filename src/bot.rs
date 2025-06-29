@@ -3,14 +3,16 @@ use anyhow::Result;
 use futures::future::join_all;
 use log::error;
 use std::collections::HashMap;
+use std::process::Command as StdCommand;
 use std::sync::Arc;
 use std::time::Duration;
 use teloxide::{
     prelude::*,
-    types::{ Message, MessageId, ThreadId, ReplyParameters },
+    types::{ Message, MessageId, ReplyParameters, ThreadId },
     utils::command::BotCommands,
 };
 use tokio::sync::mpsc::Receiver;
+use tokio::task::JoinError;
 use tokio::time::timeout;
 
 #[derive(BotCommands, Clone)]
@@ -18,8 +20,8 @@ use tokio::time::timeout;
 enum TelegramCommand {
     #[command(description = "display this text.")]
     Help,
-    #[command(description = "check service health. <all|server_name>")] Health(String),
-    #[command(description = "see who is logged in. <server_name>")] Who(String),
+    #[command(description = "check service health. <all|server_name|master>")] Health(String),
+    #[command(description = "see who is logged in. <server_name|master>")] Who(String),
     #[command(description = "list summary of all nodes.")]
     List,
 }
@@ -34,7 +36,7 @@ pub async fn run(
     api_key: String
 ) -> Result<()> {
     let bot = Bot::new(bot_token);
-    let chat_id: i64 = chat_id_str.parse()?;
+    let _chat_id: i64 = chat_id_str.parse()?;
     let alert_channel_id: i64 = alert_channel_id_str.parse()?;
     let bot_clone = bot.clone();
 
@@ -50,7 +52,7 @@ pub async fn run(
             );
 
             let mut request = bot_clone.send_message(ChatId(alert_channel_id), message);
-            
+
             if let Some(id) = topic_id {
                 request = request.message_thread_id(ThreadId(MessageId(id)));
             }
@@ -99,6 +101,8 @@ async fn answer(
     slaves: &HashMap<String, String>,
     api_key: &str
 ) -> ResponseResult<()> {
+    let master_alias = std::env::var("SERVER_ALIAS").unwrap_or_else(|_| "master".to_string());
+
     match cmd {
         TelegramCommand::Help => {
             bot
@@ -107,31 +111,49 @@ async fn answer(
                 .reply_parameters(ReplyParameters::new(msg.id)).await?;
         }
         TelegramCommand::Health(target) => {
-            if target.to_lowercase() == "all" {
+            let target_lower = target.to_lowercase();
+            if target_lower == "all" {
                 let mut tasks = Vec::new();
                 for (alias, addr) in slaves.clone() {
                     let key = api_key.to_string();
-                    tasks.push(async move {
-                        let result = timeout(
-                            Duration::from_secs(3),
-                            crate::connector::send_command_to_slave::<HealthResponse>(
-                                &addr,
-                                Command::Health,
-                                &key
-                            )
-                        ).await;
-                        match result {
-                            Ok(Ok(resp)) => format!("✅ [{}] {}", resp.alias, resp.status),
-                            _ => format!("❌ [{}] Timeout or Error", alias),
-                        }
-                    });
+                    tasks.push(
+                        tokio::spawn(async move {
+                            let result = timeout(
+                                Duration::from_secs(3),
+                                crate::connector::send_command_to_slave::<HealthResponse>(
+                                    &addr,
+                                    Command::Health,
+                                    &key
+                                )
+                            ).await;
+                            match result {
+                                Ok(Ok(resp)) => format!("✅ [{}] {}", resp.alias, resp.status),
+                                _ => format!("❌ [{}] Timeout or Error", alias),
+                            }
+                        })
+                    );
                 }
-                let results = join_all(tasks).await;
+                let m_alias = master_alias.clone();
+                tasks.push(tokio::spawn(async move { format!("✅ [{}] Healthy", m_alias) }));
+
+                // --- FIX: Correctly handle the Vec<Result<...>> ---
+                let results: Vec<Result<String, JoinError>> = join_all(tasks).await;
+                let report_lines: Vec<String> = results
+                    .into_iter()
+                    .map(|res| res.unwrap_or_else(|e| format!("Error joining task: {}", e)))
+                    .collect();
+
                 bot
                     .send_message(
                         msg.chat.id,
-                        format!("--- Health Report ---\n{}", results.join("\n"))
+                        format!("--- Health Report ---\n{}", report_lines.join("\n"))
                     )
+                    .message_thread_id(msg.thread_id.unwrap_or(ThreadId(MessageId(0))))
+                    .reply_parameters(ReplyParameters::new(msg.id)).await?;
+            } else if target_lower == "master" {
+                let text = format!("✅ [{}] Healthy", master_alias);
+                bot
+                    .send_message(msg.chat.id, text)
                     .message_thread_id(msg.thread_id.unwrap_or(ThreadId(MessageId(0))))
                     .reply_parameters(ReplyParameters::new(msg.id)).await?;
             } else {
@@ -155,7 +177,22 @@ async fn answer(
             }
         }
         TelegramCommand::Who(alias) => {
-            if let Some(addr) = slaves.get(&alias) {
+            let alias_lower = alias.to_lowercase();
+            if alias_lower == "master" {
+                let output = StdCommand::new("who")
+                    .output()
+                    .map_or_else(
+                        |e| format!("Error executing command: {}", e),
+                        |o| String::from_utf8_lossy(&o.stdout).to_string()
+                    );
+                bot
+                    .send_message(
+                        msg.chat.id,
+                        format!("--- Who on {} ---\n`{}`", master_alias, output)
+                    )
+                    .message_thread_id(msg.thread_id.unwrap_or(ThreadId(MessageId(0))))
+                    .reply_parameters(ReplyParameters::new(msg.id)).await?;
+            } else if let Some(addr) = slaves.get(&alias) {
                 match
                     crate::connector::send_command_to_slave::<WhoResponse>(
                         addr,
@@ -190,33 +227,66 @@ async fn answer(
             let mut tasks = Vec::new();
             for (alias, addr) in slaves.clone() {
                 let key = api_key.to_string();
-                tasks.push(async move {
-                    let result = timeout(
-                        Duration::from_secs(3),
-                        crate::connector::send_command_to_slave::<ListResponse>(
-                            &addr,
-                            Command::List,
-                            &key
-                        )
-                    ).await;
-                    match result {
-                        Ok(Ok(resp)) =>
-                            format!(
-                                "✅ *{}*\n  Host: `{}`\n  IP: `{}`\n  Uptime: `{}`",
-                                resp.alias,
-                                resp.hostname,
-                                resp.ip,
-                                resp.uptime
-                            ),
-                        _o => format!("❌ *{}*\n  Unreachable", alias),
-                    }
-                });
+                tasks.push(
+                    tokio::spawn(async move {
+                        let result = timeout(
+                            Duration::from_secs(3),
+                            crate::connector::send_command_to_slave::<ListResponse>(
+                                &addr,
+                                Command::List,
+                                &key
+                            )
+                        ).await;
+                        match result {
+                            Ok(Ok(resp)) =>
+                                format!(
+                                    "✅ *{}*\n  Host: `{}`\n  IP: `{}`\n  Uptime: `{}`",
+                                    resp.alias,
+                                    resp.hostname,
+                                    resp.ip,
+                                    resp.uptime
+                                ),
+                            _o => format!("❌ *{}*\n  Unreachable", alias),
+                        }
+                    })
+                );
             }
-            let results = join_all(tasks).await;
+            let m_alias = master_alias.clone();
+            tasks.push(
+                tokio::spawn(async move {
+                    let uptime = StdCommand::new("uptime")
+                        .arg("-p")
+                        .output()
+                        .map_or_else(
+                            |e| format!("Error: {}", e),
+                            |o| String::from_utf8_lossy(&o.stdout).trim().to_string()
+                        );
+                    let hostname = hostname
+                        ::get()
+                        .map(|s| s.to_string_lossy().into_owned())
+                        .unwrap_or_default();
+                    let ip = crate::informer::get_server_ip().unwrap_or_default();
+                    format!(
+                        "✅ *{}* (Master)\n  Host: `{}`\n  IP: `{}`\n  Uptime: `{}`",
+                        m_alias,
+                        hostname,
+                        ip,
+                        uptime
+                    )
+                })
+            );
+
+            // --- FIX: Correctly handle the Vec<Result<...>> ---
+            let results: Vec<Result<String, JoinError>> = join_all(tasks).await;
+            let summary_lines: Vec<String> = results
+                .into_iter()
+                .map(|res| res.unwrap_or_else(|e| format!("Error joining task: {}", e)))
+                .collect();
+
             bot
                 .send_message(
                     msg.chat.id,
-                    format!("--- Node Summary ---\n{}", results.join("\n\n"))
+                    format!("--- Node Summary ---\n{}", summary_lines.join("\n\n"))
                 )
                 .message_thread_id(msg.thread_id.unwrap_or(ThreadId(MessageId(0))))
                 .reply_parameters(ReplyParameters::new(msg.id)).await?;

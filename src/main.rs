@@ -44,10 +44,44 @@ async fn run_master(config: config::Config) -> Result<()> {
     // Channel for alerts from the connector to the bot logic
     let (alert_tx, alert_rx) = mpsc::channel(100);
 
+    info!("Master is also starting in slave mode to monitor local logs.");
+    let local_alert_tx = alert_tx.clone();
+    
+    let master_alias_for_informer = std::env
+        ::var("SERVER_ALIAS")
+        .unwrap_or_else(|_| "master".to_string());
+
+    tokio::spawn(async move {
+        // Start the log watcher from informer.rs
+        match informer::watch_log_file().await {
+            Ok(mut alert_receiver) => {
+                info!("Local log informer started successfully for master.");
+                loop {
+                    // Wait for an alert from the local log file
+                    if let Some(mut alert) = alert_receiver.recv().await {
+                        info!(
+                            "Master's informer detected event: {:?}, forwarding to bot.",
+                            alert.event_type
+                        );
+                        // Set the alias to distinguish it as the master's alert
+                        alert.slave_alias = master_alias_for_informer.clone();
+                        // Send the alert directly to the bot's channel
+                        if let Err(e) = local_alert_tx.send(alert).await {
+                            error!("Failed to send local alert from master to bot channel: {}", e);
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                error!("Failed to start local log informer for master: {:?}", e);
+            }
+        }
+    });
+
     // Start the internal server to listen for alerts from slaves
     let server_handle = tokio::spawn(
         connector::start_server(
-            config.slave_listen_addr.clone(),
+            config.listen_addr.clone(),
             config.internal_api_key.clone(),
             alert_tx
         )
@@ -59,7 +93,7 @@ async fn run_master(config: config::Config) -> Result<()> {
             bot_token,
             chat_id_str,
             alert_channel_id_str,
-            topic_id, // <-- FIX: Pass topic_id to the bot's run function
+            topic_id,
             alert_rx,
             config.slaves,
             config.internal_api_key
@@ -86,7 +120,7 @@ async fn run_slave(config: config::Config) -> Result<()> {
     // Start the internal server to listen for commands from the master
     let server_handle = tokio::spawn(
         connector::start_server(
-            config.slave_listen_addr.clone(),
+            config.listen_addr.clone(),
             config.internal_api_key.clone(),
             alert_tx
         )
