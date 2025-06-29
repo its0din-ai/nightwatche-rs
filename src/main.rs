@@ -35,6 +35,9 @@ async fn run_master(config: config::Config) -> Result<()> {
     let chat_id_str = config.telegram_chat_id.context(
         "TELEGRAM_CHAT_ID is required for MASTER mode"
     )?;
+    let alert_channel_id_str = config.alert_channel_id.context(
+        "ALERT_CHANNEL_ID is required for MASTER mode"
+    )?;
     // FIX: Get the topic ID from the config
     let topic_id = config.telegram_topic_id;
 
@@ -55,6 +58,7 @@ async fn run_master(config: config::Config) -> Result<()> {
         bot::run(
             bot_token,
             chat_id_str,
+            alert_channel_id_str,
             topic_id, // <-- FIX: Pass topic_id to the bot's run function
             alert_rx,
             config.slaves,

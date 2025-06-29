@@ -27,6 +27,7 @@ enum TelegramCommand {
 pub async fn run(
     bot_token: String,
     chat_id_str: String,
+    alert_channel_id_str: String,
     topic_id: Option<i32>,
     mut alert_receiver: Receiver<Alert>,
     slaves: HashMap<String, String>,
@@ -34,6 +35,7 @@ pub async fn run(
 ) -> Result<()> {
     let bot = Bot::new(bot_token);
     let chat_id: i64 = chat_id_str.parse()?;
+    let alert_channel_id: i64 = alert_channel_id_str.parse()?;
     let bot_clone = bot.clone();
 
     tokio::spawn(async move {
@@ -47,7 +49,8 @@ pub async fn run(
                 alert.log_line
             );
 
-            let mut request = bot_clone.send_message(ChatId(chat_id), message);
+            let mut request = bot_clone.send_message(ChatId(alert_channel_id), message);
+            
             if let Some(id) = topic_id {
                 request = request.message_thread_id(ThreadId(MessageId(id)));
             }

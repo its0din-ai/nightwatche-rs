@@ -8,7 +8,8 @@ pub struct Config {
     pub app_mode: AppMode,
     pub telegram_bot_token: Option<String>,
     pub telegram_chat_id: Option<String>,
-    pub telegram_topic_id: Option<i32>, // <-- FIX: Added topic ID field
+    pub alert_channel_id: Option<String>,
+    pub telegram_topic_id: Option<i32>,
     pub master_api_endpoint: Option<String>,
     pub internal_api_key: String,
     pub slave_listen_addr: String,
@@ -35,7 +36,6 @@ pub fn load() -> Result<Config> {
         _ => return Err(anyhow::anyhow!("Invalid APP_MODE: {}", app_mode_str)),
     };
 
-    // FIX: Parse the TOPIC_ID from environment. It's optional.
     let telegram_topic_id = env::var("TOPIC_ID").ok().and_then(|id| id.parse::<i32>().ok());
 
 
@@ -45,7 +45,8 @@ pub fn load() -> Result<Config> {
         app_mode,
         telegram_bot_token: env::var("TELEGRAM_BOT_TOKEN").ok(),
         telegram_chat_id: env::var("TELEGRAM_CHAT_ID").ok(),
-        telegram_topic_id, // <-- FIX: Assign parsed topic ID
+        alert_channel_id: env::var("ALERT_CHANNEL_ID").ok(),
+        telegram_topic_id,
         master_api_endpoint: env::var("MASTER_API_ENDPOINT").ok(),
         internal_api_key,
         slave_listen_addr: env::var("SLAVE_LISTEN_ADDR").unwrap_or_else(|_| "0.0.0.0:8080".to_string()),
