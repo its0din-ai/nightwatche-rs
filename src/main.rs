@@ -36,8 +36,8 @@ async fn run_master(config: config::Config) -> Result<()> {
     if config.telegram_chat_ids.is_empty() {
         return Err(anyhow::anyhow!("TELEGRAM_CHAT_ID is required for MASTER mode"));
     }
-    if config.alert_channel_ids.is_empty() {
-        return Err(anyhow::anyhow!("ALERT_CHANNEL_ID is required for MASTER mode"));
+    if config.alert_targets.is_empty() {
+        return Err(anyhow::anyhow!("ALERT_TARGETS is required for MASTER mode"));
     }
 
     let (alert_tx, alert_rx) = mpsc::channel(100);
@@ -84,8 +84,7 @@ async fn run_master(config: config::Config) -> Result<()> {
         bot::run(
             bot_token,
             config.telegram_chat_ids,
-            config.alert_channel_ids,
-            config.telegram_topic_ids,
+            config.alert_targets,
             alert_rx,
             config.slaves,
             config.internal_api_key

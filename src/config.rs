@@ -9,8 +9,7 @@ pub struct Config {
     pub app_mode: AppMode,
     pub telegram_bot_token: Option<String>,
     pub telegram_chat_ids: Vec<i64>,
-    pub alert_channel_ids: Vec<i64>,
-    pub telegram_topic_ids: Vec<i32>,
+    pub alert_targets: Vec<TelegramTarget>,
     pub master_api_endpoint: Option<String>,
     pub internal_api_key: String,
     pub listen_addr: String,
@@ -26,6 +25,33 @@ pub enum AppMode {
 struct ServersConfig {
     slaves: HashMap<String, String>,
 }
+
+
+#[derive(Clone, Debug)]
+pub struct TelegramTarget {
+    pub chat_id: i64,
+    pub topic_id: Option<i32>,
+}
+
+
+fn get_telegram_targets(var_name: &str) -> Result<Vec<TelegramTarget>> {
+    env::var(var_name).map_or(Ok(Vec::new()), |s| {
+        s.split(',')
+            .map(|item| {
+                let mut parts = item.trim().split(':');
+                let chat_id_str = parts.next().ok_or_else(|| anyhow!("Missing chat ID"))?;
+                let chat_id = chat_id_str.parse::<i64>()?;
+                let topic_id = parts
+                    .next()
+                    .map(|s| s.parse::<i32>())
+                    .transpose()?;
+                Ok(TelegramTarget { chat_id, topic_id })
+            })
+            .collect::<Result<Vec<TelegramTarget>>>()
+            .context(format!("Failed to parse environment variable {}", var_name))
+    })
+}
+
 
 fn get_env_vec<T>(var_name: &str) -> Result<Vec<T>>
     where T: FromStr, <T as FromStr>::Err: std::error::Error + Send + Sync + 'static
@@ -57,8 +83,7 @@ pub fn load() -> Result<Config> {
         app_mode,
         telegram_bot_token: env::var("TELEGRAM_BOT_TOKEN").ok(),
         telegram_chat_ids: get_env_vec("TELEGRAM_CHAT_ID")?,
-        alert_channel_ids: get_env_vec("ALERT_CHANNEL_ID")?,
-        telegram_topic_ids: get_env_vec("TELEGRAM_TOPIC_ID")?,
+        alert_targets: get_telegram_targets("ALERT_TARGETS")?,
         master_api_endpoint: env::var("MASTER_API_ENDPOINT").ok(),
         internal_api_key,
         listen_addr: env

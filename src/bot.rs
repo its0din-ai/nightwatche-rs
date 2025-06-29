@@ -1,7 +1,7 @@
 use crate::models::{ Alert, Command, HealthResponse, ListResponse, WhoResponse };
 use anyhow::Result;
 use futures::future::join_all;
-use log::{ error, info};
+use log::{ error, info };
 use std::collections::HashMap;
 use std::process::Command as StdCommand;
 use std::sync::Arc;
@@ -14,6 +14,7 @@ use teloxide::{
 use tokio::sync::mpsc::Receiver;
 use tokio::task::JoinError;
 use tokio::time::timeout;
+use crate::config::TelegramTarget;
 
 #[derive(BotCommands, Clone)]
 #[command(rename_rule = "lowercase", description = "These commands are supported:")]
@@ -29,8 +30,7 @@ enum TelegramCommand {
 pub async fn run(
     bot_token: String,
     whitelisted_chat_ids: Vec<i64>,
-    alert_channel_ids: Vec<i64>,
-    topic_ids: Vec<i32>,
+    alert_targets: Vec<TelegramTarget>,
     mut alert_receiver: Receiver<Alert>,
     slaves: HashMap<String, String>,
     api_key: String
@@ -50,32 +50,14 @@ pub async fn run(
                 alert.log_line
             );
 
-            for &channel_id in &alert_channel_ids {
-                if !topic_ids.is_empty() {
-                    for &topic_id in &topic_ids {
-                        let mut request = bot_clone.send_message(
-                            ChatId(channel_id),
-                            message.clone()
-                        );
-                        request = request.message_thread_id(ThreadId(MessageId(topic_id)));
-                        if let Err(e) = request.await {
-                            error!(
-                                "Failed to send alert to channel {} topic {}: {}",
-                                channel_id,
-                                topic_id,
-                                e
-                            );
-                        }
-                    }
-                } else {
-                    if
-                        let Err(e) = bot_clone.send_message(
-                            ChatId(channel_id),
-                            message.clone()
-                        ).await
-                    {
-                        error!("Failed to send alert to channel {}: {}", channel_id, e);
-                    }
+            for target in &alert_targets {
+                let mut request = bot_clone.send_message(ChatId(target.chat_id), message.clone());
+                if let Some(topic_id) = target.topic_id {
+                    request = request.message_thread_id(ThreadId(MessageId((topic_id as i64).try_into().unwrap())));
+                }
+
+                if let Err(e) = request.await {
+                    error!("Failed to send alert to chat {}: {:?}", target.chat_id, e);
                 }
             }
         }
