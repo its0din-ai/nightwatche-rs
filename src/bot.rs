@@ -1,7 +1,7 @@
 use crate::models::{ Alert, Command, HealthResponse, ListResponse, WhoResponse };
 use anyhow::Result;
 use futures::future::join_all;
-use log::error;
+use log::{ error, info};
 use std::collections::HashMap;
 use std::process::Command as StdCommand;
 use std::sync::Arc;
@@ -28,16 +28,15 @@ enum TelegramCommand {
 
 pub async fn run(
     bot_token: String,
-    chat_id_str: String,
-    alert_channel_id_str: String,
-    topic_id: Option<i32>,
+    whitelisted_chat_ids: Vec<i64>,
+    alert_channel_ids: Vec<i64>,
+    topic_ids: Vec<i32>,
     mut alert_receiver: Receiver<Alert>,
     slaves: HashMap<String, String>,
     api_key: String
 ) -> Result<()> {
+    info!("Bot starting with {} whitelisted chat IDs.", whitelisted_chat_ids.len());
     let bot = Bot::new(bot_token);
-    let _chat_id: i64 = chat_id_str.parse()?;
-    let alert_channel_id: i64 = alert_channel_id_str.parse()?;
     let bot_clone = bot.clone();
 
     tokio::spawn(async move {
@@ -51,27 +50,43 @@ pub async fn run(
                 alert.log_line
             );
 
-            let mut request = bot_clone.send_message(ChatId(alert_channel_id), message);
-
-            if let Some(id) = topic_id {
-                request = request.message_thread_id(ThreadId(MessageId(id)));
-            }
-
-            if let Err(e) = request.await {
-                error!("Failed to send alert to Telegram: {}", e);
+            for &channel_id in &alert_channel_ids {
+                if !topic_ids.is_empty() {
+                    for &topic_id in &topic_ids {
+                        let mut request = bot_clone.send_message(
+                            ChatId(channel_id),
+                            message.clone()
+                        );
+                        request = request.message_thread_id(ThreadId(MessageId(topic_id)));
+                        if let Err(e) = request.await {
+                            error!(
+                                "Failed to send alert to channel {} topic {}: {}",
+                                channel_id,
+                                topic_id,
+                                e
+                            );
+                        }
+                    }
+                } else {
+                    if
+                        let Err(e) = bot_clone.send_message(
+                            ChatId(channel_id),
+                            message.clone()
+                        ).await
+                    {
+                        error!("Failed to send alert to channel {}: {}", channel_id, e);
+                    }
+                }
             }
         }
     });
 
     let slaves_arc = Arc::new(slaves);
     let api_key_arc = Arc::new(api_key);
+    let whitelisted_chats_arc = Arc::new(whitelisted_chat_ids);
 
     let handler = Update::filter_message()
-        .filter(move |msg: Message| {
-            topic_id.map_or(true, |t_id| {
-                msg.thread_id.map_or(false, |msg_t_id| msg_t_id.0.0 == t_id)
-            })
-        })
+        .filter(move |msg: Message| { whitelisted_chats_arc.contains(&msg.chat.id.0) })
         .filter_command::<TelegramCommand>()
         .endpoint(
             |

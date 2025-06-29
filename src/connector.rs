@@ -17,9 +17,6 @@ use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio::sync::mpsc;
 
-// FIX: The entire ApiKey struct and its `FromRequestParts` implementation have been removed
-// as it was the source of the persistent lifetime error.
-
 #[derive(Clone)]
 struct AppState {
     api_key_hash: Arc<Vec<u8>>,
@@ -34,7 +31,6 @@ pub async fn send_command_to_slave<T: for<'de> serde::Deserialize<'de>>(
     let client = Client::new();
     let response = client
         .post(&format!("http://{}/command", slave_addr))
-        // FIX: Use the directly imported AUTHORIZATION constant for consistency.
         .header(AUTHORIZATION, format!("Bearer {}", api_key))
         .header(CONTENT_TYPE, "application/json")
         .json(&command)

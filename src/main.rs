@@ -32,40 +32,34 @@ async fn run_master(config: config::Config) -> Result<()> {
     let bot_token = config.telegram_bot_token.context(
         "TELEGRAM_BOT_TOKEN is required for MASTER mode"
     )?;
-    let chat_id_str = config.telegram_chat_id.context(
-        "TELEGRAM_CHAT_ID is required for MASTER mode"
-    )?;
-    let alert_channel_id_str = config.alert_channel_id.context(
-        "ALERT_CHANNEL_ID is required for MASTER mode"
-    )?;
-    // FIX: Get the topic ID from the config
-    let topic_id = config.telegram_topic_id;
 
-    // Channel for alerts from the connector to the bot logic
+    if config.telegram_chat_ids.is_empty() {
+        return Err(anyhow::anyhow!("TELEGRAM_CHAT_ID is required for MASTER mode"));
+    }
+    if config.alert_channel_ids.is_empty() {
+        return Err(anyhow::anyhow!("ALERT_CHANNEL_ID is required for MASTER mode"));
+    }
+
     let (alert_tx, alert_rx) = mpsc::channel(100);
 
     info!("Master is also starting in slave mode to monitor local logs.");
     let local_alert_tx = alert_tx.clone();
-    
+
     let master_alias_for_informer = std::env
         ::var("SERVER_ALIAS")
         .unwrap_or_else(|_| "master".to_string());
 
     tokio::spawn(async move {
-        // Start the log watcher from informer.rs
         match informer::watch_log_file().await {
             Ok(mut alert_receiver) => {
                 info!("Local log informer started successfully for master.");
                 loop {
-                    // Wait for an alert from the local log file
                     if let Some(mut alert) = alert_receiver.recv().await {
                         info!(
                             "Master's informer detected event: {:?}, forwarding to bot.",
                             alert.event_type
                         );
-                        // Set the alias to distinguish it as the master's alert
                         alert.slave_alias = master_alias_for_informer.clone();
-                        // Send the alert directly to the bot's channel
                         if let Err(e) = local_alert_tx.send(alert).await {
                             error!("Failed to send local alert from master to bot channel: {}", e);
                         }
@@ -78,22 +72,20 @@ async fn run_master(config: config::Config) -> Result<()> {
         }
     });
 
-    // Start the internal server to listen for alerts from slaves
     let server_handle = tokio::spawn(
         connector::start_server(
             config.listen_addr.clone(),
             config.internal_api_key.clone(),
-            alert_tx
+            alert_tx.clone()
         )
     );
 
-    // Start the Telegram bot
     let bot_handle = tokio::spawn(
         bot::run(
             bot_token,
-            chat_id_str,
-            alert_channel_id_str,
-            topic_id,
+            config.telegram_chat_ids,
+            config.alert_channel_ids,
+            config.telegram_topic_ids,
             alert_rx,
             config.slaves,
             config.internal_api_key
@@ -114,10 +106,8 @@ async fn run_slave(config: config::Config) -> Result<()> {
         "MASTER_API_ENDPOINT is required for SLAVE mode"
     )?;
 
-    // This channel is unused in the slave but required by the connector's function signature
     let (alert_tx, _) = mpsc::channel(1);
 
-    // Start the internal server to listen for commands from the master
     let server_handle = tokio::spawn(
         connector::start_server(
             config.listen_addr.clone(),
@@ -126,7 +116,6 @@ async fn run_slave(config: config::Config) -> Result<()> {
         )
     );
 
-    // Start the log watcher
     let mut alert_receiver = informer::watch_log_file().await?;
 
     let alert_forwarder_handle = tokio::spawn(async move {
