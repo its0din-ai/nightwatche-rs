@@ -47,11 +47,15 @@ jobs:
             exit 1
           fi
 
+      - name: Rename binary for artifact
+        run: |
+          cp target/x86_64-unknown-linux-gnu/release/nightwatche-rs nightwatche-rs-linux-amd64
+
       - name: Upload binary artifact
         uses: actions/upload-artifact@v4
         with:
           name: nightwatche-rs-linux-amd64
-          path: target/x86_64-unknown-linux-gnu/release/nightwatche-rs
+          path: nightwatche-rs-linux-amd64
 
       - name: Upload SHA256 sum file
         uses: actions/upload-artifact@v4
@@ -109,4 +113,4 @@ jobs:
           gh release upload $TAG_NAME \
             artifacts/nightwatche-rs-linux-amd64 \
             artifacts/prebuilt.sha256 \
-            --repo ${{ github.repository }} --clobber
+            --repo its0din-ai/nightwatche-rs --clobber
