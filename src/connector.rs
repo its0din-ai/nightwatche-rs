@@ -1,8 +1,5 @@
-use crate::models::{ Alert, Command, HealthResponse, ListResponse, WhoResponse };
 use anyhow::Result;
-// FIX: No longer need async_trait
 use axum::{
-    // FIX: Import HeaderMap
     extract::{ State },
     http::{ header::{ AUTHORIZATION, CONTENT_TYPE }, HeaderMap, StatusCode },
     routing::post,
@@ -16,6 +13,7 @@ use std::process::Command as StdCommand;
 use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio::sync::mpsc;
+use crate::models::{ Alert, Command, HealthResponse, ListResponse, WhoResponse };
 
 #[derive(Clone)]
 struct AppState {
@@ -82,7 +80,7 @@ pub async fn start_server(
 #[axum::debug_handler]
 async fn handle_alert(
     State(state): State<AppState>,
-    // FIX: Extract the headers directly instead of using a custom extractor.
+
     headers: HeaderMap,
     Json(alert): Json<Alert>
 ) -> Result<(), StatusCode> {
@@ -95,7 +93,7 @@ async fn handle_alert(
 #[axum::debug_handler]
 async fn handle_command(
     State(state): State<AppState>,
-    // FIX: Extract headers here as well.
+
     headers: HeaderMap,
     Json(command): Json<Command>
 ) -> Result<Json<serde_json::Value>, StatusCode> {
@@ -145,7 +143,6 @@ async fn handle_command(
     }
 }
 
-// FIX: Refactored authentication logic to take the full HeaderMap.
 fn authenticate(headers: &HeaderMap, expected_hash: &[u8]) -> Result<(), StatusCode> {
     if let Some(auth_header) = headers.get(AUTHORIZATION).and_then(|value| value.to_str().ok()) {
         if let Some(key) = auth_header.strip_prefix("Bearer ") {

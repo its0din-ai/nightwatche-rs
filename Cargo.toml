@@ -1,7 +1,7 @@
 [package]
 name = "nightwatche-rs"
 description = "Nightwatche, an auth log Telegram notifier."
-version = "0.2.2"
+version = "0.2.3"
 authors = ["encrypt0r"]
 repository = "https://github.com/its0din-ai/nightwatche-rs"
 license = "MPL-2.0"

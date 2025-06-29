@@ -1,0 +1,7 @@
+{
+    "slaves": {
+        "node-1": "10.10.10.1:13001",
+        "node-2": "10.10.10.2:13001"
+    },
+    "description": "This is the server list that will become the slaves, use format \"server_alias\":\"ip_address:port\""
+}

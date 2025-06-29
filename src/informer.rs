@@ -1,4 +1,3 @@
-use crate::models::Alert;
 use anyhow::{ Context, Result };
 use chrono::{ DateTime, Duration, FixedOffset, Utc };
 use log::{ error, info };
@@ -10,6 +9,7 @@ use std::io::{ BufRead, BufReader, Seek, SeekFrom };
 use std::net::IpAddr;
 use std::path::Path;
 use tokio::sync::mpsc::{ self, Receiver, Sender };
+use crate::models::Alert;
 
 struct FailureTracker {
     attempts: HashMap<String, Vec<DateTime<Utc>>>,
@@ -55,7 +55,6 @@ pub async fn watch_log_file() -> Result<Receiver<Alert>> {
 }
 
 async fn run_watcher(log_path: &str, tx: Sender<Alert>) -> Result<()> {
-    // --- Rule Definitions ---
     let ssh_success_re = Regex::new(r"sshd.*Accepted (password|publickey) for (\S+) from (\S+)")?;
     let ssh_failure_re = Regex::new(
         r"sshd.*(?:Failed (?:password|publickey) for (?:invalid user )?(\S+)|Invalid user (\S+)) from (\S+) port \d+"
@@ -64,7 +63,6 @@ async fn run_watcher(log_path: &str, tx: Sender<Alert>) -> Result<()> {
     let new_user_re = Regex::new(r"(useradd|adduser).*new user")?;
     let new_group_re = Regex::new(r"(groupadd|addgroup).*new group")?;
 
-    // --- State Initialization ---
     let mut brute_force_tracker = FailureTracker::new(5, 120); // 5 attempts in 120 seconds
 
     let path = Path::new(log_path);
@@ -128,7 +126,7 @@ fn create_alert(event_type: &str, log_line: &str) -> Alert {
     Alert {
         slave_alias: std::env::var("SERVER_ALIAS").unwrap_or_else(|_| "unknown".to_string()),
         event_type: event_type.to_string(),
-        // FIX: Changed deprecated `east` to `east_opt`
+
         timestamp: Utc::now().with_timezone(&FixedOffset::east_opt(0).unwrap()).to_string(),
         log_line: log_line.trim().to_string(),
         server_ip: get_server_ip().unwrap_or_else(|_| "unknown".to_string()),
@@ -139,7 +137,6 @@ fn create_alert(event_type: &str, log_line: &str) -> Alert {
     }
 }
 
-// FIX: Made the function public so other modules can access it
 pub fn get_server_ip() -> Result<String> {
     let interfaces = if_addrs::get_if_addrs().context("Failed to get network interfaces")?;
     for interface in interfaces {

@@ -7,14 +7,13 @@ mod config;
 mod connector;
 mod informer;
 mod models;
+mod templates;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Initialize logger and load configuration
     pretty_env_logger::init();
     let config = config::load().context("Failed to load configuration")?;
 
-    // Delegate to the appropriate run mode
     let result = match config.app_mode {
         config::AppMode::Master => run_master(config).await,
         config::AppMode::Slave => run_slave(config).await,

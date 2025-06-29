@@ -26,13 +26,11 @@ struct ServersConfig {
     slaves: HashMap<String, String>,
 }
 
-
 #[derive(Clone, Debug)]
 pub struct TelegramTarget {
     pub chat_id: i64,
     pub topic_id: Option<i32>,
 }
-
 
 fn get_telegram_targets(var_name: &str) -> Result<Vec<TelegramTarget>> {
     env::var(var_name).map_or(Ok(Vec::new()), |s| {
@@ -51,7 +49,6 @@ fn get_telegram_targets(var_name: &str) -> Result<Vec<TelegramTarget>> {
             .context(format!("Failed to parse environment variable {}", var_name))
     })
 }
-
 
 fn get_env_vec<T>(var_name: &str) -> Result<Vec<T>>
     where T: FromStr, <T as FromStr>::Err: std::error::Error + Send + Sync + 'static
@@ -86,9 +83,7 @@ pub fn load() -> Result<Config> {
         alert_targets: get_telegram_targets("ALERT_TARGETS")?,
         master_api_endpoint: env::var("MASTER_API_ENDPOINT").ok(),
         internal_api_key,
-        listen_addr: env
-            ::var("LISTEN_ADDR")
-            .unwrap_or_else(|_| "127.0.0.1:13001".to_string()),
+        listen_addr: env::var("LISTEN_ADDR").unwrap_or_else(|_| "127.0.0.1:13001".to_string()),
         slaves: HashMap::new(),
     };
 
