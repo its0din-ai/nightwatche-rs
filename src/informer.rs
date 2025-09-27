@@ -56,14 +56,9 @@ pub async fn watch_log_file() -> Result<Receiver<Alert>> {
 
 async fn run_watcher(log_path: &str, tx: Sender<Alert>) -> Result<()> {
     let ssh_success_re = Regex::new(r"sshd.*Accepted (password|publickey) for (\S+) from (\S+)")?;
-    let ssh_failure_re = Regex::new(
-        r"sshd.*(?:Failed (?:password|publickey) for (?:invalid user )?(\S+)|Invalid user (\S+)) from (\S+) port \d+"
-    )?;
     let sudo_re = Regex::new(r"sudo:.*COMMAND=(.+)")?;
     let new_user_re = Regex::new(r"(useradd|adduser).*new user")?;
     let new_group_re = Regex::new(r"(groupadd|addgroup).*new group")?;
-
-    let mut brute_force_tracker = FailureTracker::new(5, 120); // 5 attempts in 120 seconds
 
     let path = Path::new(log_path);
     let mut file = File::open(path).context(format!("Failed to open log file: {}", log_path))?;
@@ -93,22 +88,6 @@ async fn run_watcher(log_path: &str, tx: Sender<Alert>) -> Result<()> {
                     alert_opt = Some(create_alert("NEW_USER_CREATED", &line));
                 } else if new_group_re.is_match(&line) {
                     alert_opt = Some(create_alert("NEW_GROUP_CREATED", &line));
-                } else if let Some(captures) = ssh_failure_re.captures(&line) {
-                    if let Some(ip) = captures.get(3) {
-                        if brute_force_tracker.record_and_check(ip.as_str()) {
-                            let username = captures
-                                .get(1)
-                                .or(captures.get(2))
-                                .map_or("unknown", |m| m.as_str());
-                            let custom_line = format!(
-                                "More than {} failed SSH attempts detected from IP {} with username {}",
-                                brute_force_tracker.max_attempts,
-                                ip.as_str(),
-                                username
-                            );
-                            alert_opt = Some(create_alert("BRUTE_FORCE_DETECTED", &custom_line));
-                        }
-                    }
                 }
 
                 if let Some(alert) = alert_opt {
